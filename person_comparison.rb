@@ -3,16 +3,36 @@ require 'json'
 require 'open-uri'
 require 'uri'
 
-CSV_FILE = 'sample.csv'
+CSV_FILE = 'Sample.csv'
 API_URI = 'https://www.wikidata.org/w/api.php'
 
 def analyze_result(result)
     if result['search'].length == 0
-        'nicht gefunden'
+        []
     elsif result['search'].length == 1
-        result['search'][0]['id']
+        [result['search'][0]['id']]
     else
-        result['search'].map{ |res| res['id'] }.join ', '
+        result['search'].map{ |res| res['id'] }
+    end
+end
+
+def analyze_get_result(result, qids)
+    if qids.length == 0
+        'kein Item gefunden'
+    elsif qids.length == 1
+        if result['entities'][qids[0]]['claims']['P569'].nil?
+          [qids[0], 'kein Geburtsdatum gefunden'].join ': '
+        else
+          [qids[0], result['entities'][qids[0]]['claims']['P569'][0]['mainsnak']['datavalue']['value']['time']].join ': '
+        end
+    else
+        result['entities'].map{ |res|
+          if res[1]['claims']['P569'].nil?
+            [res[0], 'kein Geburtsdatum gefunden'].join ': '
+          else
+            [res[0], res[1]['claims']['P569'][0]['mainsnak']['datavalue']['value']['time']].join ': '
+          end
+        }.join ', '
     end
 end
 
@@ -22,12 +42,23 @@ search_query = {
     format: 'json'
 }
 
-CSV.foreach(CSV_FILE, col_sep: ';') do |row|
+get_query = {
+    action: 'wbgetentities',
+    format: 'json'
+}
+
+CSV.foreach(CSV_FILE, col_sep: ',') do |row|
     name = "#{row[5]} #{row[4]}" # row[5] ist der Vorname, row[4] der Nachname
     search_query[:search] = name # suche nach dem vollen Namen
 
     result = JSON.parse(open("#{API_URI}?#{URI.encode_www_form(search_query)}").read) # API Anfrage stellen und auswerten
-    puts "#{name}: #{analyze_result(result)}"
+    qids = analyze_result(result)
+
+    #puts "#{name}: #{qids}"
+
+    get_query[:ids] = qids.join '|'
+    get_result = JSON.parse(open("#{API_URI}?#{URI.encode_www_form(get_query)}").read)
+    puts "#{name}: #{analyze_get_result(get_result, qids)}"
 
     sleep 0.5
 end
