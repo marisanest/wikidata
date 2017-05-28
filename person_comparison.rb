@@ -4,9 +4,21 @@ require 'open-uri'
 require 'uri'
 
 CSV_FILE = 'Sample.csv'
+CSV_RESULT_FILE = 'Sample_Result.csv'
 API_URI = 'https://www.wikidata.org/w/api.php'
 
-def analyze_result(result)
+search_query = { # Query Parameter für wbsearchentities
+    action: 'wbsearchentities',
+    language: 'de',
+    format: 'json'
+}
+
+get_query = { # Query Parameter für wbgetentities
+    action: 'wbgetentities',
+    format: 'json'
+}
+
+def analyze_search_query_result(result)
     if result['search'].length == 0
         []
     elsif result['search'].length == 1
@@ -16,61 +28,95 @@ def analyze_result(result)
     end
 end
 
-def analyze_get_result(result, qids)
+def analyze_get_query_result(result, qids)
     if qids.length == 0
-        'kein Item gefunden'
+        [[]]
     elsif qids.length == 1
-        if result['entities'][qids[0]]['claims']['P569'].nil?
-          [qids[0], 'kein Geburtsdatum gefunden'].join ': '
-        else
-          [qids[0], result['entities'][qids[0]]['claims']['P569'][0]['mainsnak']['datavalue']['value']['time']].join ': '
-        end
+        label = result['entities'][qids[0]]['labels']['de'].nil? ? 'kein Label gefunden' : result['entities'][qids[0]]['labels']['de']['value']
+        description = result['entities'][qids[0]]['descriptions']['de'].nil? ? 'keine Beschreibung gefunden' : result['entities'][qids[0]]['descriptions']['de']['value']
+        day_of_birth = result['entities'][qids[0]]['claims']['P569'].nil? ? 'kein Geburtsdatum gefunden' : DateTime.iso8601(result['entities'][qids[0]]['claims']['P569'][0]['mainsnak']['datavalue']['value']['time'])
+        occupation = result['entities'][qids[0]]['claims']['P106'].nil? ? 'kein Beruf gefunden' : result['entities'][qids[0]]['claims']['P106'][0]['mainsnak']['datavalue']['value']['id']
+
+        [[qids[0], label, description, day_of_birth, occupation]]
     else
-        result['entities'].map{ |res|
-          if res[1]['claims']['P569'].nil?
-            [res[0], 'kein Geburtsdatum gefunden'].join ': '
-          else
-            [res[0], res[1]['claims']['P569'][0]['mainsnak']['datavalue']['value']['time']].join ': '
-          end
-        }.join ', '
+        qids.map{ |qid|
+          label = result['entities'][qid]['labels']['de'].nil? ? 'kein Label gefunden' : result['entities'][qid]['labels']['de']['value']
+          description = result['entities'][qid]['descriptions']['de'].nil? ? 'keine Beschreibung gefunden' : result['entities'][qid]['descriptions']['de']['value']
+          day_of_birth = result['entities'][qid]['claims']['P569'].nil? ? 'kein Geburtsdatum gefunden' : DateTime.iso8601(result['entities'][qid]['claims']['P569'][0]['mainsnak']['datavalue']['value']['time'])
+          occupation = result['entities'][qid]['claims']['P106'].nil? ? 'kein Beruf gefunden' : result['entities'][qid]['claims']['P106'][0]['mainsnak']['datavalue']['value']['id']
+          [qid, label, description, day_of_birth, occupation]
+        }
     end
 end
 
-search_query = {
-    action: 'wbsearchentities',
-    language: 'de',
-    format: 'json'
-}
+def fill_row_with_results(row, results)
 
-get_query = {
-    action: 'wbgetentities',
-    format: 'json'
-}
+  qids = []
+  labels = []
+  description = []
+  days_of_birth = []
+  occupations = []
 
-CSV.foreach(CSV_FILE, col_sep: ',') do |row|
-    name = "#{row[5]} #{row[4]}" # row[5] ist der Vorname, row[4] der Nachname
-    search_query[:search] = name # suche nach dem vollen Namen
+  results.each do |result|
+    qids << result[0]
+    labels << result[1]
+    description << result[2]
+    days_of_birth << result[3]
+    occupations << result[4]
+  end
 
-    result = JSON.parse(open("#{API_URI}?#{URI.encode_www_form(search_query)}").read) # API Anfrage stellen und auswerten
-    qids = analyze_result(result)
+  row[34] = qids.join ', ' #  row[34] ist die Wikidata QID
+  row[35] = labels.join ', ' # row[35] ist das Wikidata Label
+  row[36] = description.join ', '# row[36] ist die Wikidata Beschreibung
+  row[37] = days_of_birth.join ', ' #  row[37] ist das Wikidata Geburtsdatum
+  row[38] = occupations.join ', ' # row[38] ist der Wikidata Beruf
 
-    #puts "#{name}: #{qids}"
-
-    get_query[:ids] = qids.join '|'
-    get_result = JSON.parse(open("#{API_URI}?#{URI.encode_www_form(get_query)}").read)
-    puts "#{name}: #{analyze_get_result(get_result, qids)}"
-
-    sleep 0.5
+  row
 end
 
-# Ergebnisse:
-# Martin Heidenhain: Q1904004, Q1904005, Q75087
-# Richard Karl Selowsky: nicht gefunden
-# Alexander von Normann: nicht gefunden
-# Richard Busch: Q57199
-# Karl Heck: Q1731452, Q18711850, Q20737351, Q27055450, Q1273375, Q1731453, Q1731454
-# Werner Hülle: Q1401170, Q2807299, Q1650707, Q1564942
-# Werner Wolfhart: nicht gefunden
-# Fritz Lindenmaier: Q1467352
-# Werner Birnbach: nicht gefunden
-# Helmuth Delbrück: Q1604397
+puts "Start analysing CSV file..." # Logging
+
+result_csv = [] # Ergebins-Array das als CSV gespeichert werden soll
+first_header = [] # Ertse Header-Zeile
+second_header = [] # Zweite Header-Zeile
+
+start_time = Time.now # Für das Logging: Zeit als Analyse gestartet ist
+current_time = Time.now # Für das Logging: Aktuelle Zeit
+rows = CSV.read(CSV_FILE, col_sep: ';').length # Für das Logging: Anzahl der Zeilen
+
+CSV.foreach(CSV_FILE, col_sep: ';') do |row|
+    first_header = row if $. == 1 # row 1 ist die erste Header Zeile
+    second_header = row if $. == 2 # row 2 ist die zweite Header Zeile
+
+    if $. != 1 && $. != 2  # row 1 und 2 werden nicht abgeglichen
+      name = "#{row[5]} #{row[4]}" # row[5] ist der Vorname, row[4] der Nachname
+
+      search_query[:search] = name # suche nach dem vollen Namen
+      search_query_result = JSON.parse(open("#{API_URI}?#{URI.encode_www_form(search_query)}").read) # API Suchanfrage stellen und in JSON parsen
+      qids = analyze_search_query_result(search_query_result) # Auswertung der API Suchanfrage
+
+
+      get_query[:ids] = qids.join '|' # QID's die abgefragt werden
+      get_query_result = JSON.parse(open("#{API_URI}?#{URI.encode_www_form(get_query)}").read) # API QID-Abfrage stellen und in JSON parsen
+      results = analyze_get_query_result(get_query_result, qids) # Auswertung der API QID-Abfrage
+
+      result_csv << fill_row_with_results(row, results) # Zeile mit Ergebnissen werden dem Ergebnis-Array hinzugefügt
+    end
+
+    sleep 0.5
+    puts "Analysed row #{$.} form #{rows} rows in #{Time.now - current_time}s" # Logging
+    current_time = Time.now # Aktuelle zeit wir aktualisiert
+end
+
+puts "Analysed #{rows} rows in #{Time.now - start_time}s" # Logging
+puts "Writing result into CSV file..." # Logging
+
+CSV.open(CSV_RESULT_FILE, 'wb') do |csv|
+  csv << first_header # Erste Header-Zeile wird in CSV-File geschrieben
+  csv << second_header # Zweite Header-Zeile wird in CSV-File geschrieben
+  result_csv.each do |row| # Ergebnis-Array wird in CSV-File geschrieben
+    csv << row
+  end
+end
+
+puts "Finished." # Logging
