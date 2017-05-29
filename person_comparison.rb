@@ -49,6 +49,31 @@ def analyze_get_query_result(result, qids)
     end
 end
 
+def isRightPerson(row, data)
+  name = "#{row[5]} #{row[4]}"
+  day_of_birth = DateTime.new(row[8].to_i, row[7].to_i, row[6].to_i)
+
+  if name.eql? data[1]
+    (data[2].downcase.include?('richter') || data[3].eql?(day_of_birth) || data[4].eql?('Q16533')) ? true : false
+  else
+    false
+  end
+end
+
+def get_matching_qids(row, data)
+  qids = []
+  data.each do |d|
+    qids << d[0] if isRightPerson(row, d)
+  end
+  qids
+end
+
+def fill_row_with_qids(row, qids)
+  row[34] = qids.join ', '
+
+  row
+end
+
 def fill_row_with_results(row, results)
 
   qids = []
@@ -100,7 +125,9 @@ CSV.foreach(CSV_FILE, col_sep: ';') do |row|
       get_query_result = JSON.parse(open("#{API_URI}?#{URI.encode_www_form(get_query)}").read) # API QID-Abfrage stellen und in JSON parsen
       results = analyze_get_query_result(get_query_result, qids) # Auswertung der API QID-Abfrage
 
-      result_csv << fill_row_with_results(row, results) # Zeile mit Ergebnissen werden dem Ergebnis-Array hinzugefügt
+      matching_qids = get_matching_qids(row, results)
+
+      result_csv << fill_row_with_qids(row, matching_qids) # Zeile mit Ergebnissen werden dem Ergebnis-Array hinzugefügt
     end
 
     sleep 0.5
