@@ -4,79 +4,116 @@ require 'open-uri'
 require 'uri'
 
 CSV_FILE = 'result.csv'
-CSV_RESULT_FILE = 'result2.csv'
+CSV_RESULT_FILE = 'result_comparison.csv'
 API_URI = 'https://www.wikidata.org/w/api.php'
+HEADER = ['akad. Grad','Namenszusatz','Nachname','Vorname', 'QID','Label','Beschreibung','Aliasse','T(G)','M(G)','J(G)','Geburtsdatum','Ort(G)','T(T)','M(T)','J(T)','Todestag','Ort(T)','Auszeichung','Beruf']
 
 query = { # Query Parameter für wbgetentities
     action: 'wbgetentities',
     format: 'json'
 }
 
-def analyze_query_result(result, qids)
-    if qids.length == 0
-        [{}]
-    elsif qids.length == 1
-        label = result['entities'][qids[0]]['labels']['de'].nil? ? 'kein Label gefunden' : result['entities'][qids[0]]['labels']['de']['value']
-        description = result['entities'][qids[0]]['descriptions']['de'].nil? ? 'keine Beschreibung gefunden' : result['entities'][qids[0]]['descriptions']['de']['value']
-        day_of_birth = result['entities'][qids[0]]['claims']['P569'].nil? ? 'kein Geburtsdatum gefunden' : result['entities'][qids[0]]['claims']['P569'][0]['mainsnak']['datavalue']['value']['time']
-        occupation = result['entities'][qids[0]]['claims']['P106'].nil? ? 'kein Beruf gefunden' : result['entities'][qids[0]]['claims']['P106'][0]['mainsnak']['datavalue']['value']['id']
-
-        [{qid: qids[0], label: label, description: description, day_of_birth: day_of_birth, occupation: occupation}]
-    else
-        qids.map{ |qid|
-          label = result['entities'][qid]['labels']['de'].nil? ? 'kein Label gefunden' : result['entities'][qid]['labels']['de']['value']
-          description = result['entities'][qid]['descriptions']['de'].nil? ? 'keine Beschreibung gefunden' : result['entities'][qid]['descriptions']['de']['value']
-          day_of_birth = result['entities'][qid]['claims']['P569'].nil? ? 'kein Geburtsdatum gefunden' : result['entities'][qid]['claims']['P569'][0]['mainsnak']['datavalue']['value']['time']
-          occupation = result['entities'][qid]['claims']['P106'].nil? ? 'kein Beruf gefunden' : result['entities'][qid]['claims']['P106'][0]['mainsnak']['datavalue']['value']['id']
-          {qid: qid, label: label, description: description, day_of_birth: day_of_birth, occupation: occupation}
-        }
+def analyzeQueryResult(result, qid)
+    res = {}
+    query = {action: 'wbgetentities', format: 'json'}
+    res[:qid] = qid
+    res[:label] = result['entities'][qid]['labels']['de'].nil? ? result['entities'][qid]['labels']['en'].nil? ? '' : result['entities'][qid]['labels']['en']['value'] : result['entities'][qid]['labels']['de']['value']
+    res[:description] = result['entities'][qid]['descriptions']['de'].nil? ? result['entities'][qid]['descriptions']['en'].nil? ? '' : result['entities'][qid]['descriptions']['en']['value'] : result['entities'][qid]['descriptions']['de']['value']
+    res[:aliases] = result['entities'][qid]['aliases']['de'].nil? ? result['entities'][qid]['aliases']['en'].nil? ? '' : result['entities'][qid]['aliases']['en'].map{|instance| instance['value']}.join(',') : result['entities'][qid]['aliases']['de'].map{|instance| instance['value']}.join(',')
+    begin
+      res[:date_of_birth] = result['entities'][qid]['claims']['P569'].nil? ? '' : DateTime.iso8601(result['entities'][qid]['claims']['P569'][0]['mainsnak']['datavalue']['value']['time'])
+    rescue ArgumentError
+      res[:date_of_birth] = result['entities'][qid]['claims']['P569'][0]['mainsnak']['datavalue']['value']['time']
     end
+    query[:ids] = result['entities'][qid]['claims']['P19'].nil? ? '' : result['entities'][qid]['claims']['P19'][0]['mainsnak']['datavalue']['value']['id']
+    res[:place_of_birth] = getLabels(JSON.parse(open("#{API_URI}?#{URI.encode_www_form(query)}").read), query[:ids].split('|'))
+
+    begin
+      res[:date_of_death] = result['entities'][qid]['claims']['P570'].nil? ? '' : DateTime.iso8601(result['entities'][qid]['claims']['P570'][0]['mainsnak']['datavalue']['value']['time'])
+    rescue ArgumentError
+      res[:date_of_death] = result['entities'][qid]['claims']['P570'][0]['mainsnak']['datavalue']['value']['time']
+    end
+    query[:ids] = result['entities'][qid]['claims']['P20'].nil? ? '' : result['entities'][qid]['claims']['P20'][0]['mainsnak']['datavalue']['value']['id']
+    res[:place_of_death] = getLabels(JSON.parse(open("#{API_URI}?#{URI.encode_www_form(query)}").read), query[:ids].split('|'))
+
+    query[:ids] = result['entities'][qid]['claims']['P166'].nil? ? '' : result['entities'][qid]['claims']['P166'].map{|instance| instance['mainsnak']['datavalue']['value']['id']}.join('|')
+    res[:awards_received] = getLabels(JSON.parse(open("#{API_URI}?#{URI.encode_www_form(query)}").read), query[:ids].split('|'))
+
+    query[:ids] = result['entities'][qid]['claims']['P106'].nil? ? '' : result['entities'][qid]['claims']['P106'].map{|instance| instance['mainsnak']['datavalue']['value']['id']}.join('|')
+    res[:occupations] = getLabels(JSON.parse(open("#{API_URI}?#{URI.encode_www_form(query)}").read), query[:ids].split('|'))
+    res
 end
 
-def fill_row_with_results(row, results)
+def getLabels(data, qids)
+  qids.map{ |qid|
+      data['entities'][qid]['labels']['de'].nil? ? data['entities'][qid]['labels']['en'].nil? ? qid : data['entities'][qid]['labels']['en'].nil? : data['entities'][qid]['labels']['de']['value']
+  }.join ','
+end
 
-  qids = []
-  labels = []
-  description = []
-  days_of_birth = []
-  occupations = []
+def fillRowWithResult(row, result)
 
-  results.each do |result|
-    qids << result[0]
-    labels << result[1]
-    description << result[2]
-    days_of_birth << result[3]
-    occupations << result[4]
+  result_row = []
+  result_row << row['akad. Grad']
+  result_row << row['Namenszusatz']
+  result_row << row['Nachname']
+  result_row << row['Vorname']
+
+  result_row << result[:qid ]
+  result_row << result[:label]
+  result_row << result[:description]
+  result_row << result[:aliases]
+
+  begin
+    result_row << result[:date_of_birth].strftime("%d")
+    result_row << result[:date_of_birth].strftime("%m")
+    result_row << result[:date_of_birth].strftime("%Y")
+    result_row << ''
+  rescue Exception
+    result_row << ''
+    result_row << ''
+    result_row << ''
+    result_row << result[:date_of_birth]
   end
 
-  row[34] = qids.join ', ' #  row[34] ist die Wikidata QID
-  row[35] = labels.join ', ' # row[35] ist das Wikidata Label
-  row[36] = description.join ', '# row[36] ist die Wikidata Beschreibung
-  row[37] = days_of_birth.join ', ' #  row[37] ist das Wikidata Geburtsdatum
-  row[38] = occupations.join ', ' # row[38] ist der Wikidata Beruf
+  result_row << result[:place_of_birth]
 
-  row
+  begin
+    result_row << result[:date_of_death].strftime("%d")
+    result_row << result[:date_of_death].strftime("%m")
+    result_row << result[:date_of_death].strftime("%Y")
+    result_row << ''
+  rescue Exception
+    result_row << ''
+    result_row << ''
+    result_row << ''
+    result_row << result[:date_of_death]
+  end
+
+  result_row << result[:place_of_death]
+
+  result_row << result[:awards_received]
+  result_row << result[:occupations]
+
+  result_row
 end
 
 puts "Start analysing CSV file..." # Logging
 
 start_time = Time.now # Für das Logging: Zeit als Analyse gestartet ist
 current_time = Time.now # Für das Logging: Aktuelle Zeit
-rows = CSV.read(CSV_FILE, col_sep: ';').length # Für das Logging: Anzahl der Zeilen
+rows = CSV.read(CSV_FILE, col_sep: ',').length # Für das Logging: Anzahl der Zeilen
 
-CSV.open(CSV_RESULT_FILE, 'wb') do |csv|
+CSV.open(CSV_RESULT_FILE, 'wb', write_headers: true, headers: HEADER) do |csv|
 
-  csv << HEADER # Header-Zeile wird in CSV-File geschrieben
+  CSV.foreach(CSV_FILE, headers: true, col_sep: ',') do |row|
 
-  CSV.foreach(CSV_FILE, :headers => true, col_sep: ',') do |row|
-
-    qids = row['QID']
-    query[:ids] = qids
-    query_result = JSON.parse(open("#{API_URI}?#{URI.encode_www_form(get_query)}").read) # API QID-Abfrage stellen und in JSON parsen
-    results = analyze_get_query_result(query_result, qids) # Auswertung der API QID-Abfrage
-
-    results = analyze_query_result(query_result, qids) # Auswertung der API QID-Abfrage
-    csv << fill_row_with_results(row, results) # Zeile mit Ergebnissen werden dem Ergebnis-Array hinzugefügt
+    qids = row['QID'].split(',')
+    if qids.length == 1
+      query[:ids] = qids[0]
+      query_result = JSON.parse(open("#{API_URI}?#{URI.encode_www_form(query)}").read) # API QID-Abfrage stellen und in JSON parsen
+      result = analyzeQueryResult(query_result, query[:ids]) # Auswertung der API QID-Abfrage
+      csv << fillRowWithResult(row, result) # Zeile mit Ergebnissen werden dem Ergebnis-Array hinzugefügt
+    end
 
     sleep 0.5
     puts "Analysed row #{$.} form #{rows} rows in #{Time.now - current_time}s" # Logging
