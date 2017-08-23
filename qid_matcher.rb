@@ -8,7 +8,7 @@ require 'set'
 # TODO mit und ohne namenszusatz suchen / unterscheidung gematchte QIDs und nicht eindeutig gematchte QIDS
 
 CSV_FILE = 'namen.csv'
-CSV_RESULT_FILE = 'result.csv'
+CSV_RESULT_FILE = "qid_match_result_#{Time.now.to_i.to_s}.csv"
 API_URI = 'https://www.wikidata.org/w/api.php'
 HEADER = ['akad. Grad','Namenszusatz','Nachname','Vorname','T','M','J','Ort','QID', 'indirekte QID']
 
