@@ -11,14 +11,8 @@ API_URI = 'https://www.wikidata.org/w/api.php'
 
 HEADER = ['akad. Grad','Namenszusatz','Nachname','Vorname',
           'QID','Label','Beschreibung','Aliasse', 'T(G)','M(G)',
-          'J(G)','Geburtsdatum','Ort(G)','T(T)','M(T)','J(T)',
-          'Todestag','Ort(T)','Auszeichung','Beruf', 'Geschlecht', 'Identifikatoren']
-
-# Query Parameter für wbgetentities
-query = {
-    action: 'wbgetentities',
-    format: 'json'
-}
+          'J(G)', 'Andere Geburtsdaten', 'Ort(G)','T(T)','M(T)','J(T)', 'Andere Todestage',
+          'Ort(T)','Auszeichung','Beruf', 'Geschlecht', 'Identifikatoren']
 
 def parseQueryResult(query_result, qid)
 
@@ -64,7 +58,6 @@ def parseQueryResult(query_result, qid)
                     end
 
     # Date of Birth
-
     parse_result[:date_of_birth] = if query_result['entities'][qid]['claims']['P569'].nil? then
                             ''
                           else
@@ -140,18 +133,18 @@ def parseQueryResult(query_result, qid)
                    ''
                  else
                    query_result['entities'][qid]['claims']['P21'].map { |instance|
-                     property = instance['mainsnak']['property']
-                      if property == 'Q6581097'
+                     sex_qid = instance['mainsnak']['datavalue']['value']['id']
+                      if sex_qid == 'Q6581097'
                         'männlich'
-                      elsif property == 'Q6581072'
+                      elsif sex_qid == 'Q6581072'
                         'weiblich'
-                      elsif property == 'Q1097630'
+                      elsif sex_qid == 'Q1097630'
                         'intersexuell'
-                      elsif property == 'Q1052281'
+                      elsif sex_qid == 'Q1052281'
                         'Transfrau'
-                      elsif property == 'Q2449503'
+                      elsif sex_qid == 'Q2449503'
                         'Transmann'
-                      elsif property == 'Q48270'
+                      elsif sex_qid == 'Q48270'
                         'Genderqueer'
                       else
                         ''
@@ -207,27 +200,30 @@ end
 def getLabels(qids)
   result = wbgetentities(qids)
 
-  qids.map{ |qid|
-    if result['entities'][qid]['labels']['de'].nil? then
-      if result['entities'][qid]['labels']['en'].nil? then
-        qid
+  if qids.length == 0
+    ''
+  else
+    qids.map{ |qid|
+      if result['entities'][qid]['labels']['de'].nil? then
+        if result['entities'][qid]['labels']['en'].nil? then
+          qid
+        else
+          result['entities'][qid]['labels']['en'].nil?
+        end
       else
-        result['entities'][qid]['labels']['en'].nil?
+        result['entities'][qid]['labels']['de']['value']
       end
-    else
-      result['entities'][qid]['labels']['de']['value']
-    end
-  }.join ','
+    }.join ','
+  end
 end
 
 def fillRowWithResult(row, result)
-
+  
   result_row = []
   result_row << row['akad. Grad']
   result_row << row['Namenszusatz']
   result_row << row['Nachname']
   result_row << row['Vorname']
-
   result_row << result[:qid ]
   result_row << result[:label]
   result_row << result[:description]
@@ -237,26 +233,32 @@ def fillRowWithResult(row, result)
     result_row << ''
     result_row << ''
     result_row << ''
-    result_row << result[:date_of_birth]
+    result_row << ''
   else
+    date_of_births = result[:date_of_birth].split(', ')
+    date_of_birth_first = date_of_births.first
+
     begin
-      result_row << result[:date_of_birth].strftime("%d")
-      result_row << result[:date_of_birth].strftime("%m")
-      result_row << result[:date_of_birth].strftime("%Y")
-      result_row << ''
+      result_row << date_of_birth_first.strftime("%d")
+      result_row << date_of_birth_first.strftime("%m")
+      result_row << date_of_birth_first.strftime("%Y")
     rescue Exception
-      tmp_date_of_birth = result[:date_of_birth].gsub(/\+/, '').split('T')[0].split('-')
+      tmp_date_of_birth = date_of_birth_first.gsub(/\+/, '').split('T')[0].split('-')
       if tmp_date_of_birth.length == 3
         result_row << tmp_date_of_birth[2]
         result_row << tmp_date_of_birth[1]
         result_row << tmp_date_of_birth[0]
-        result_row << result[:date_of_birth]
       else
+        result_row << "Error: #{date_of_birth_first}"
         result_row << ''
         result_row << ''
-        result_row << ''
-        result_row << result[:date_of_birth]
       end
+    end
+
+    if date_of_births.length > 1
+      result_row << date_of_births.slice(1, (date_of_births.length - 1)).join(', ')
+    else
+      result_row << ''
     end
   end
 
@@ -266,32 +268,36 @@ def fillRowWithResult(row, result)
     result_row << ''
     result_row << ''
     result_row << ''
-    result_row << result[:date_of_death]
+    result_row << ''
   else
+    date_of_deaths = result[:date_of_death].split(', ')
+    date_of_death_first = date_of_deaths.first
+
     begin
-      result_row << result[:date_of_death].strftime("%d")
-      result_row << result[:date_of_death].strftime("%m")
-      result_row << result[:date_of_death].strftime("%Y")
-      result_row << ''
+      result_row << date_of_death_first.strftime("%d")
+      result_row << date_of_death_first.strftime("%m")
+      result_row << date_of_death_first.strftime("%Y")
     rescue Exception
-      tmp_date_of_death = result[:date_of_death].gsub(/\+/, '').split('T')[0].split('-')
+      tmp_date_of_death = date_of_death_first.gsub(/\+/, '').split('T')[0].split('-')
       if tmp_date_of_death.length == 3
         result_row << tmp_date_of_death[2]
         result_row << tmp_date_of_death[1]
         result_row << tmp_date_of_death[0]
-        result_row << result[:date_of_death]
       else
+        result_row << "Error: #{date_of_death_first}"
         result_row << ''
         result_row << ''
-        result_row << ''
-        result_row << result[:date_of_death]
       end
+    end
+
+    if date_of_deaths.length > 1
+      result_row << date_of_deaths.slice(1, (date_of_deaths.length - 1)).join(', ')
+    else
+      result_row << ''
     end
   end
 
-
   result_row << result[:place_of_death]
-
   result_row << result[:awards_received]
   result_row << result[:occupations]
   result_row << result[:sex]

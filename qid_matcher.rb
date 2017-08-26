@@ -54,28 +54,34 @@ end
 
 def isRightPerson(row, person)
 
-    vorname = row['Vorname'].nil? ? '' : row['Vorname']
-    nachname = row['Nachname'].nil? ? '' : row['Nachname']
+  if person[:de_description].downcase.include?('Wikimedia-Begriffsklärungsseite') || person[:en_description].downcase.include?('Wikimedia disambiguation page')
+    return false
+  end
 
+  vorname = row['Vorname'].nil? ? '' : row['Vorname']
+  nachname = row['Nachname'].nil? ? '' : row['Nachname']
+
+  begin
+    day_of_birth = DateTime.new(row['J'].to_i, row['M'].to_i, row['T'].to_i, 0, 0, 0)
+  rescue ArgumentError
+    day_of_birth = -1
+    puts "DateTime ArgumentError for #{vorname} #{nachname} with date #{row['J'].to_i} #{row['M'].to_i} #{row['T'].to_i}"
+  end
+
+  check = person[:label].include?(vorname) && person[:label].include?(nachname)
+  check = check && (person[:de_description].downcase.include?('richter') || person[:en_description].downcase.include?('judge') || person[:day_of_birth].eql?(day_of_birth) || person[:occupation].eql?('Q16533'))
+
+  if check == false && !vorname.downcase.include?('richter') && !nachname.downcase.include?('richter')
     begin
-      day_of_birth = DateTime.new(row['J'].to_i, row['M'].to_i, row['T'].to_i)
-    rescue ArgumentError
-      day_of_birth = -1
-      puts "DateTime ArgumentError for #{vorname} #{nachname} with date #{row['J'].to_i} #{row['M'].to_i} #{row['T'].to_i}"
+      wikipedia = person[:site_link].nil? ? '' : Net::HTTP.get(URI(person[:site_link]))
+    rescue URI::InvalidURIError
+      puts "InvalidURIError for #{vorname} #{nachname} with sitelink: #{person[:site_link]}!"
+      wikipedia = ''
     end
+    check = wikipedia.downcase.include?('richter') && person[:label].include?(vorname) && person[:label].include?(nachname)
+  end
 
-    check = ((person[:label].include?(vorname) && person[:label].include?(nachname)) && (person[:de_description].downcase.include?('richter') || person[:en_description].downcase.include?('judge') || person[:day_of_birth].eql?(day_of_birth) || person[:occupation].eql?('Q16533')))
-
-    if check == false && !vorname.downcase.include?('richter') && !nachname.downcase.include?('richter')
-      begin
-        wikipedia = person[:site_link].nil? ? '' : Net::HTTP.get(URI(person[:site_link]))
-      rescue URI::InvalidURIError
-        puts "InvalidURIError for #{vorname} #{nachname} with sitelink: #{person[:site_link]}!"
-        wikipedia = ''
-      end
-      check = wikipedia.downcase.include?('richter') && person[:label].include?(vorname) && person[:label].include?(nachname)
-    end
-    check
+  check
 end
 
 def getMatchingQids(row, persons)
