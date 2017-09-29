@@ -5,10 +5,8 @@ require 'uri'
 require 'net/http'
 require 'set'
 
-# TODO mit und ohne namenszusatz suchen / unterscheidung gematchte QIDs und nicht eindeutig gematchte QIDS
-
-CSV_FILE = 'namen.csv'
-CSV_RESULT_FILE = "qid_match_result_#{Time.now.to_i.to_s}.csv"
+CSV_FILE = 'data/data_for_qid_matching.csv'
+CSV_RESULT_FILE = "results/qid_matching/qid_match_result_#{Time.now.strftime('%Y%m%d%H%M%S')}.csv"
 API_URI = 'https://www.wikidata.org/w/api.php'
 HEADER = ['akad. Grad','Namenszusatz','Nachname','Vorname','T','M','J','Ort','QID', 'indirekte QID']
 
@@ -23,7 +21,7 @@ get_query = { # Query Parameter für wbgetentities
     format: 'json'
 }
 
-def analyzeSearchQueryResult(result)
+def analyze_search_query_result(result)
     if result['search'].length == 0
       []
     elsif result['search'].length == 1
@@ -33,75 +31,127 @@ def analyzeSearchQueryResult(result)
     end
 end
 
-def analyzeGetQueryResult(result, qids)
+def analyze_get_query_result(result, qids)
     qids.map{ |qid|
         res = {}
         res[:qid] = qid
-        res[:label] = result['entities'][qid]['labels']['de'].nil? ? 'kein Label gefunden' : result['entities'][qid]['labels']['de']['value']
-        res[:de_description] = result['entities'][qid]['descriptions']['de'].nil? ? 'keine Beschreibung gefunden' : result['entities'][qid]['descriptions']['de']['value']
-        res[:en_description] = result['entities'][qid]['descriptions']['en'].nil? ? 'keine Beschreibung gefunden' : result['entities'][qid]['descriptions']['en']['value']
-        begin
-          res[:day_of_birth] = result['entities'][qid]['claims']['P569'].nil? ? 'kein Geburtsdatum gefunden' : DateTime.iso8601(result['entities'][qid]['claims']['P569'][0]['mainsnak']['datavalue']['value']['time'])
-        rescue ArgumentError
-          res[:day_of_birth] = result['entities'][qid]['claims']['P569'].nil? ? 'kein Geburtsdatum gefunden' : result['entities'][qid]['claims']['P569'][0]['mainsnak']['datavalue']['value']['time']
-          puts "DateTime ArgumentError for QID #{qid} with date #{result['entities'][qid]['claims']['P569'][0]['mainsnak']['datavalue']['value']['time']}"
-        end
-        res[:occupation] = result['entities'][qid]['claims']['P106'].nil? ? 'kein Beruf gefunden' : result['entities'][qid]['claims']['P106'][0]['mainsnak']['datavalue']['value']['id']
-        res[:site_link] = result['entities'][qid]['sitelinks']['dewiki'].nil? ? nil : getURI(result['entities'][qid]['sitelinks']['dewiki']['title'])
+        res[:labels] = {de: result['entities'][qid]['labels']['de'].nil? ? '' : result['entities'][qid]['labels']['de']['value'].downcase,
+                        en: result['entities'][qid]['labels']['en'].nil? ? '' : result['entities'][qid]['labels']['en']['value'].downcase}
+        res[:descriptions] = {de: result['entities'][qid]['descriptions']['de'].nil? ? '' : result['entities'][qid]['descriptions']['de']['value'].downcase,
+                              en: result['entities'][qid]['descriptions']['en'].nil? ? '' : result['entities'][qid]['descriptions']['en']['value'].downcase}
+        res[:day_of_birth] = result['entities'][qid]['claims']['P569'].nil? ? nil : {time: new_date_from_iso8601(result['entities'][qid]['claims']['P569'][0]['mainsnak']['datavalue']['value']['time'], result['entities'][qid]['claims']['P569'][0]['mainsnak']['datavalue']['value']['precision']),
+                                                                                     precision: result['entities'][qid]['claims']['P569'][0]['mainsnak']['datavalue']['value']['precision']}
+        res[:occupations] = result['entities'][qid]['claims']['P106'].nil? ? nil : result['entities'][qid]['claims']['P106'].map{|occupation| occupation['mainsnak']['datavalue']['value']['id']}.join('|')
+        res[:site_link] = result['entities'][qid]['sitelinks']['dewiki'].nil? ? nil : get_uri(result['entities'][qid]['sitelinks']['dewiki']['title'])
         res
     }
 end
 
-def isRightPerson(row, person)
+def is_right_page?(row, page)
+  return false if is_wikimedia_disambiguation_page?(page)
 
-  if person[:de_description].downcase.include?('Wikimedia-Begriffsklärungsseite') || person[:en_description].downcase.include?('Wikimedia disambiguation page')
-    return false
-  end
+  day_of_birth = (row['J'].nil? && row['M'].nil? && row['T'].nil?) ? nil
+                  : {time: new_date(row['J'].to_i, row['M'].to_i, row['T'].to_i),
+                    precision: precision(row['J'].to_i, row['M'].to_i, row['T'].to_i)}
 
-  vorname = row['Vorname'].nil? ? '' : row['Vorname']
-  nachname = row['Nachname'].nil? ? '' : row['Nachname']
-
-  begin
-    day_of_birth = DateTime.new(row['J'].to_i, row['M'].to_i, row['T'].to_i, 0, 0, 0)
-  rescue ArgumentError
-    day_of_birth = -1
-    puts "DateTime ArgumentError for #{vorname} #{nachname} with date #{row['J'].to_i} #{row['M'].to_i} #{row['T'].to_i}"
-  end
-
-  check = person[:label].include?(vorname) && person[:label].include?(nachname)
-  check = check && (person[:de_description].downcase.include?('richter') || person[:en_description].downcase.include?('judge') || person[:day_of_birth].eql?(day_of_birth) || person[:occupation].eql?('Q16533'))
-
-  if check == false && !vorname.downcase.include?('richter') && !nachname.downcase.include?('richter')
-    begin
-      wikipedia = person[:site_link].nil? ? '' : Net::HTTP.get(URI(person[:site_link]))
-    rescue URI::InvalidURIError
-      puts "InvalidURIError for #{vorname} #{nachname} with sitelink: #{person[:site_link]}!"
-      wikipedia = ''
-    end
-    check = wikipedia.downcase.include?('richter') && person[:label].include?(vorname) && person[:label].include?(nachname)
-  end
+  check = (is_right_label?(row, page[:labels][:de]) || is_right_label?(row, page[:labels][:en]))
+  check = check && (page[:descriptions][:de].include?('richter') || page[:descriptions][:de].include?('jurist') || page[:descriptions][:en].include?('judge') || (page[:labels][:de].include?('richter') ? false : site_link_include_word?(page[:site_link], 'richter')))
+  check = check && ((page[:day_of_birth].nil? || day_of_birth.nil?) ? true : do_dates_match?(page[:day_of_birth][:time], page[:day_of_birth][:precision], day_of_birth[:time], day_of_birth[:precision]))
+  check = check && (page[:occupations].nil? ? true : (page[:occupations].include?('Q16533') || page[:occupations].include?('Q185351')))
 
   check
 end
 
-def getMatchingQids(row, persons)
+def new_date_from_iso8601(date, precision)
+  if precision == 7
+    DateTime.new(date.split('-')[0].sub('+', '').to_i - 100)
+  elsif precision == 8 || precision == 9
+    DateTime.new(date.split('-')[0].sub('+', '').to_i)
+  elsif precision == 10
+    DateTime.new(date.split('-')[0].sub('+', '').to_i, date.split('-')[1].to_i)
+  elsif precision >= 11
+    DateTime.iso8601(date)
+  end
+end
+
+def new_date(year, month, day)
+  if day == 0 && month == 0 && year == 0
+      nil
+  elsif day == 0 && month == 0
+      DateTime.new(year)
+  elsif day == 0
+      DateTime.new(year, month)
+  else
+      DateTime.new(year, month, day)
+  end
+end
+
+def precision(year, month, day)
+  if day == 0 && month == 0 && year == 0
+    -1
+  elsif day == 0 && month == 0
+    9
+  elsif day == 0
+    10
+  else
+    11
+  end
+end
+
+def do_dates_match?(date1, precision1, date2, precision2)
+  if precision1 < 7 || precision2 < 7
+    false
+  elsif precision1 == 7 || precision2 == 7
+    date1.strftime('%C').eql?(date2.strftime('%C'))
+  elsif precision1 == 8 || precision2 == 8
+    (date1.year / 10).eql?((date2.year / 10))
+  elsif precision1 == 9 || precision2 == 9
+    date1.year.eql?(date2.year)
+  elsif precision1 == 10 || precision2 == 10
+    date1.year.eql?(date2.year) && date1.month.eql?(date2.month)
+  elsif precision1 >= 11 || precision2 >= 11
+    date1.year.eql?(date2.year) && date1.month.eql?(date2.month) && date1.day.eql?(date2.day)
+  end
+end
+
+def is_wikimedia_disambiguation_page?(page)
+  page[:descriptions][:de].include?('wikimedia-begriffsklärungsseite') || page[:descriptions][:en].include?('wikimedia disambiguation page')
+end
+
+def site_link_include_word?(site_link, word)
+  return false if site_link.nil?
+  begin
+    html = Net::HTTP.get(URI(site_link))
+  rescue URI::InvalidURIError
+    puts "InvalidURIError for sitelink: #{site_link}!"
+    return false
+  end
+  html.downcase.include?(word)
+end
+
+def is_right_label?(row, label)
+  check = row['Vorname'].nil? ? false : " #{label} ".include?(" #{row['Vorname'].downcase} ")
+  check && (row['Nachname'].nil? ? false : " #{label} ".include?(" #{row['Nachname'].downcase} "))
+end
+
+def get_matching_qids(row, pages)
     qids = {}
     qids[:matches] = []
     qids[:indirect_matches] = []
 
-    persons.each do |person|
-      qids[:matches] << person[:qid] if isRightPerson(row, person)
+    pages.each do |page|
+      qids[:matches] << page[:qid] if is_right_page?(row, page)
     end
 
     if qids[:matches].length == 0
-      persons.each do |person|
-        qids[:indirect_matches] << person[:qid]
+      pages.each do |page|
+        qids[:indirect_matches] << page[:qid] if ((is_right_label?(row, page[:labels][:de]) || is_right_label?(row, page[:labels][:en])) && !is_wikimedia_disambiguation_page?(page))
       end
     end
     qids
 end
 
-def getURI(string)
+def get_uri(string)
   string.gsub!(/\s/, '_')
   string.gsub!(/ä/, '%E4')
   string.gsub!(/ü/, '%FC')
@@ -127,22 +177,22 @@ CSV.open(CSV_RESULT_FILE, 'wb', write_headers: true, headers: HEADER) do |csv|
 
     search_query[:search] = name # suche nach dem vollen Namen
     search_query_result = JSON.parse(open("#{API_URI}?#{URI.encode_www_form(search_query)}").read) # API Suchanfrage stellen und in JSON parsen
-    qids = analyzeSearchQueryResult(search_query_result) # Auswertung der API Suchanfrage
+    qids = analyze_search_query_result(search_query_result) # Auswertung der API Suchanfrage
 
     name_with_affix = "#{row['Vorname']} #{row['Namenszusatz']} #{row['Nachname']}"
 
     search_query[:search] = name_with_affix # suche nach dem vollen Namen mit Namenszustaz
     search_query_result = JSON.parse(open("#{API_URI}?#{URI.encode_www_form(search_query)}").read) # API Suchanfrage stellen und in JSON parsen
-    qids = qids + analyzeSearchQueryResult(search_query_result) # Auswertung der API Suchanfrage
+    qids = qids + analyze_search_query_result(search_query_result) # Auswertung der API Suchanfrage
 
     qids = Set.new(qids).to_a
 
     get_query[:ids] = qids.join '|' # QID's die abgefragt werden
     get_query_result = JSON.parse(open("#{API_URI}?#{URI.encode_www_form(get_query)}").read) # API QID-Abfrage stellen und in JSON parsen
 
-    results = analyzeGetQueryResult(get_query_result, qids) # Auswertung der API QID-Abfrage
+    results = analyze_get_query_result(get_query_result, qids) # Auswertung der API QID-Abfrage
 
-    matching_qids = getMatchingQids(row, results)
+    matching_qids = get_matching_qids(row, results)
 
     row['QID'] = matching_qids[:matches].join ', ' # direkt passende QID's werden Zeile hinzugefügt
     row['indirekte QID'] = matching_qids[:indirect_matches].join ', ' # indirekt passende QID's werden Zeile hinzugefügt

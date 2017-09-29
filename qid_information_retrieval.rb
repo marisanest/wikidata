@@ -3,16 +3,16 @@ require 'json'
 require 'open-uri'
 require 'uri'
 
-CSV_FILE = 'qid_match_result.csv'
+CSV_FILE = 'data/data_for_information_retrival.csv'
 
-CSV_RESULT_FILE = "qid_information_retrieval_result_#{Time.now.to_i.to_s}.csv"
+CSV_RESULT_FILE = "results/information_retrival/qid_information_retrieval_result_#{Time.now.strftime('%Y%m%d')}.csv"
 
 API_URI = 'https://www.wikidata.org/w/api.php'
 
 HEADER = ['akad. Grad','Namenszusatz','Nachname','Vorname',
           'QID','Label','Beschreibung','Aliasse', 'T(G)','M(G)',
           'J(G)', 'Andere Geburtsdaten', 'Ort(G)','T(T)','M(T)','J(T)', 'Andere Todestage',
-          'Ort(T)','Auszeichung','Beruf', 'Geschlecht', 'Identifikatoren']
+          'Ort(T)','Auszeichung','Beruf', 'Geschlecht', 'externe Ids']
 
 def parseQueryResult(query_result, qid)
 
@@ -218,7 +218,7 @@ def getLabels(qids)
 end
 
 def fillRowWithResult(row, result)
-  
+
   result_row = []
   result_row << row['akad. Grad']
   result_row << row['Namenszusatz']
