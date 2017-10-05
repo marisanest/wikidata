@@ -12,9 +12,12 @@ API_URI = 'https://www.wikidata.org/w/api.php'
 HEADER = ['akad. Grad','Namenszusatz','Nachname','Vorname',
           'QID','Label','Beschreibung','Aliasse', 'T(G)','M(G)',
           'J(G)', 'Andere Geburtsdaten', 'Ort(G)','T(T)','M(T)','J(T)', 'Andere Todestage',
-          'Ort(T)','Auszeichung','Beruf', 'Geschlecht', 'externe Ids']
+          'Ort(T)','Auszeichung','Beruf', 'Geschlecht', 'LCAuth', 'VIAF', 'GND', 'NTA-Nummer',
+          'Munzinger Personen', 'ISNI', 'SUDOC-Normdaten', 'BnF-ID', 'FAST ID', 'weitere externe Ids']
 
-def parseQueryResult(query_result, qid)
+KNOWN_EXTERNAL_ID_PROPERTIES = ['P244', 'P214', 'P227', 'P1006', 'P1284', 'P213', 'P269', 'P268', 'P2163']
+
+def parse_query_result(query_result, qid)
 
     parse_result = {}
 
@@ -80,7 +83,7 @@ def parseQueryResult(query_result, qid)
             }
           end
 
-    parse_result[:place_of_birth] = getLabels(qids)
+    parse_result[:place_of_birth] = get_labels(qids).join ','
 
     # Date of Death
     parse_result[:date_of_death] = if query_result['entities'][qid]['claims']['P570'].nil? then
@@ -104,7 +107,7 @@ def parseQueryResult(query_result, qid)
              }
            end
 
-    parse_result[:place_of_death] = getLabels(qids)
+    parse_result[:place_of_death] = get_labels(qids).join ','
 
     # Awards Received
     qids = if query_result['entities'][qid]['claims']['P166'].nil? then
@@ -115,7 +118,7 @@ def parseQueryResult(query_result, qid)
              }
            end
 
-    parse_result[:awards_received] = getLabels(qids)
+    parse_result[:awards_received] = get_labels(qids).join ','
 
     # Occupations
     qids = if query_result['entities'][qid]['claims']['P106'].nil? then
@@ -126,7 +129,7 @@ def parseQueryResult(query_result, qid)
              }
            end
 
-    parse_result[:occupations] = getLabels(qids)
+    parse_result[:occupations] = get_labels(qids).join ','
 
     # Sex
     parse_result[:sex] =  if query_result['entities'][qid]['claims']['P21'].nil? then
@@ -154,31 +157,32 @@ def parseQueryResult(query_result, qid)
                  end
 
     # External Ids
-    parse_result[:external_ids] = getExternalIds(query_result, qid)
+    parse_result[:external_ids] = get_external_ids_as_hash(query_result, qid)
 
     parse_result
 end
 
-def getExternalIds(query_result, qid)
-  external_ids = query_result['entities'][qid]['claims'].values.reject { |claim|
-    claim.map { |value|
-      value['mainsnak']['datatype'] == 'external-id'
-    }.include?(false)
+def get_external_ids_as_hash(query_result, qid)
+  external_id_claims = query_result['entities'][qid]['claims'].values.flat_map { |claim|
+    claim.reject { |value|
+      value['mainsnak']['datatype'] != 'external-id'
+    }
   }
 
-  external_ids.map { |claim|
-    claim.map { |value|
-      property_id = value['mainsnak']['property']
-      external_id = value['mainsnak']['datavalue']['value']
-      label = getLabels([property_id])
-      external_url = getExternalURL(property_id, external_id)
-      "#{label}: ID: #{external_id} URL: #{external_url}"
-    }.join(', ')
-  }.join(', ')
+  external_id_hash = {}
+
+  external_id_claims.each { |claim|
+    external_id_hash[claim['mainsnak']['property']] = [] unless external_id_hash.key?(claim['mainsnak']['property'])
+    external_id_hash[claim['mainsnak']['property']] << { external_id: claim['mainsnak']['datavalue']['value'],
+      label: get_label(claim['mainsnak']['property']),
+      external_url: get_external_url(claim['mainsnak']['property'], claim['mainsnak']['datavalue']['value'])}
+    }
+
+    external_id_hash
 end
 
-def getExternalURL(pid, id)
-  result = wbgetentities([pid])
+def get_external_url(pid, id)
+  result = wbgetentities(pid)
   formatter_URLs = result['entities'][pid]['claims']['P1630']
   if formatter_URLs.nil?
     ''
@@ -192,32 +196,42 @@ end
 def wbgetentities(qids)
   query = {action: 'wbgetentities',
            format: 'json',
-           ids: qids.join('|')}
+           ids: qids.is_a?(String) ? qids : qids.join('|')}
 
   JSON.parse(open("#{API_URI}?#{URI.encode_www_form(query)}").read)
 end
 
-def getLabels(qids)
-  result = wbgetentities(qids)
+def get_label(qid)
+  result = wbgetentities(qid)
 
-  if qids.length == 0
-    ''
+  if result['entities'][qid]['labels']['de'].nil?
+    if result['entities'][qid]['labels']['en'].nil?
+      qid
+    else
+      result['entities'][qid]['labels']['en']['value']
+    end
   else
-    qids.map{ |qid|
-      if result['entities'][qid]['labels']['de'].nil? then
-        if result['entities'][qid]['labels']['en'].nil? then
-          qid
-        else
-          result['entities'][qid]['labels']['en'].nil?
-        end
-      else
-        result['entities'][qid]['labels']['de']['value']
-      end
-    }.join ','
+    result['entities'][qid]['labels']['de']['value']
   end
 end
 
-def fillRowWithResult(row, result)
+def get_labels(qids)
+  result = wbgetentities(qids)
+
+  qids.map{ |qid|
+    if result['entities'][qid]['labels']['de'].nil?
+      if result['entities'][qid]['labels']['en'].nil?
+        qid
+      else
+        result['entities'][qid]['labels']['en']
+      end
+    else
+      result['entities'][qid]['labels']['de']['value']
+    end
+  }
+end
+
+def fill_row_with_result(row, result)
 
   result_row = []
   result_row << row['akad. Grad']
@@ -301,9 +315,24 @@ def fillRowWithResult(row, result)
   result_row << result[:awards_received]
   result_row << result[:occupations]
   result_row << result[:sex]
-  result_row << result[:external_ids]
+  KNOWN_EXTERNAL_ID_PROPERTIES.each { |property|
+    result_row << (result[:external_ids].key?(property) ? result[:external_ids][property].map { |external_id|
+      external_id_hash_as_string(external_id)
+    }.join(' | ') : '')
+  }
+  result_row << result[:external_ids].keys.reject { |key|
+    KNOWN_EXTERNAL_ID_PROPERTIES.include?(key)
+  }.map { |key|
+      result[:external_ids][key].map { |external_id|
+        external_id_hash_as_string(external_id, true)
+      }.join(' | ')
+  }.join(' | ')
 
   result_row
+end
+
+def external_id_hash_as_string(external_id_hash, with_label=false)
+  "#{with_label ? "#{external_id_hash[:label]}: " : ''}ID: #{external_id_hash[:external_id]} URL: #{external_id_hash[:external_url]}"
 end
 
 puts "Start analysing CSV file..." # Logging
@@ -318,9 +347,9 @@ CSV.open(CSV_RESULT_FILE, 'wb', write_headers: true, headers: HEADER) do |csv|
 
     qids = row['QID'].split(',')
     if qids.length == 1
-      query_result = wbgetentities([qids[0]]) # stellt API QID-Abfrage und parst es in JSON parsen
-      parse_result = parseQueryResult(query_result, qids[0]) # Auswertung der API QID-Abfrage
-      csv << fillRowWithResult(row, parse_result) # Zeile mit Ergebnissen werden dem Ergebnis-Array hinzugefügt
+      query_result = wbgetentities(qids[0]) # stellt API QID-Abfrage und parst es in JSON parsen
+      parse_result = parse_query_result(query_result, qids[0]) # Auswertung der API QID-Abfrage
+      csv << fill_row_with_result(row, parse_result) # Zeile mit Ergebnissen werden dem Ergebnis-Array hinzugefügt
     end
 
     sleep 0.5
