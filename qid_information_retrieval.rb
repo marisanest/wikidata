@@ -353,7 +353,7 @@ CSV.open(CSV_RESULT_FILE, 'wb', write_headers: true, headers: HEADER) do |csv|
     end
 
     sleep 0.5
-    puts "Analysed row #{$.} form #{rows} rows in #{Time.now - current_time}s" # Logging
+    puts "Analysed row #{$.} of #{rows} rows in #{Time.now - current_time}s" # Logging
     current_time = Time.now # Aktuelle zeit wir aktualisiert
   end
 end
