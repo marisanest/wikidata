@@ -5,7 +5,7 @@ require 'uri'
 
 CSV_FILE = 'data/data_for_information_retrival.csv'
 
-CSV_RESULT_FILE = "results/information_retrival/qid_information_retrieval_result_#{Time.now.strftime('%Y%m%d')}.csv"
+CSV_RESULT_FILE = "results/information_retrival/qid_information_retrieval_result_#{Time.now.strftime('%Y%m%d%H%M%S')}.csv"
 
 API_URI = 'https://www.wikidata.org/w/api.php'
 
