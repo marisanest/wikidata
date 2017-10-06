@@ -13,9 +13,9 @@ HEADER = ['akad. Grad','Namenszusatz','Nachname','Vorname',
           'QID','Label','Beschreibung','Aliasse', 'T(G)','M(G)',
           'J(G)', 'Andere Geburtsdaten', 'Ort(G)','T(T)','M(T)','J(T)', 'Andere Todestage',
           'Ort(T)','Auszeichung','Beruf', 'Geschlecht', 'LCAuth', 'VIAF', 'GND', 'NTA-Nummer',
-          'Munzinger Personen', 'ISNI', 'SUDOC-Normdaten', 'BnF-ID', 'FAST ID', 'weitere externe Ids']
+          'Munzinger Personen', 'ISNI', 'SUDOC-Normdaten', 'BnF-ID', 'FAST ID', 'Freebase-ID', 'NUKAT-Normdaten', 'weitere externe Ids']
 
-KNOWN_EXTERNAL_ID_PROPERTIES = ['P244', 'P214', 'P227', 'P1006', 'P1284', 'P213', 'P269', 'P268', 'P2163']
+KNOWN_EXTERNAL_ID_PROPERTIES = ['P244', 'P214', 'P227', 'P1006', 'P1284', 'P213', 'P269', 'P268', 'P2163', 'P646', 'P1207']
 
 def parse_query_result(query_result, qid)
 
